@@ -1,0 +1,22 @@
+{
+  "name": "classnotes-desktop",
+  "version": "0.2.4",
+  "private": true,
+  "description": "课记：本地课堂录音与 AI 知识笔记",
+  "author": "Class Notes",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "pack": "electron-builder --dir --publish never",
+    "dist": "electron-builder --win nsis --x64 --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9",
+    "semver": "7.8.5"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3"
+  }
+}

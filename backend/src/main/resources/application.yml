@@ -1,0 +1,35 @@
+server:
+  address: 127.0.0.1
+  port: ${PORT:8080}
+spring:
+  servlet:
+    multipart:
+      max-file-size: 1GB
+      max-request-size: 1GB
+  threads:
+    virtual:
+      enabled: true
+  jackson:
+    default-property-inclusion: non_null
+  web:
+    resources:
+      static-locations: file:../frontend/dist/,classpath:/static/
+app:
+  version: ${APP_VERSION:0.2.4}
+  desktop: ${APP_DESKTOP:false}
+  api-token: ${APP_API_TOKEN:}
+  data-dir: ${DATA_DIR:../data}
+  demo: ${APP_DEMO:false}
+  queue-enabled: ${QUEUE_ENABLED:true}
+  worker-url: ${ASR_WORKER_URL:http://127.0.0.1:8090}
+  worker-token: ${ASR_WORKER_TOKEN:}
+  llm-base-url: ${LLM_BASE_URL:https://api.openai.com/v1}
+  llm-model: ${LLM_MODEL:}
+  llm-api-key: ${LLM_API_KEY:}
+  notion-token: ${NOTION_TOKEN:}
+  notion-database-id: ${NOTION_DATABASE_ID:}
+  notion-data-source-id: ${NOTION_DATA_SOURCE_ID:}
+  notion-base-url: https://api.notion.com/v1
+logging:
+  level:
+    cn.classnotes: INFO

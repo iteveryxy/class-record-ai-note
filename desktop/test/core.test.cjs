@@ -1,0 +1,32 @@
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const path = require('node:path')
+const { safeAsset,updateUrl,compatibleUpdate,freePort,isInside }=require('../src/core.cjs')
+test('bundled asset resolution rejects traversal and backslashes',()=>{
+  const root=path.resolve('test-ui')
+  assert.equal(safeAsset(root,'/'),path.join(root,'index.html'))
+  assert.equal(safeAsset(root,'/assets/app.js'),path.join(root,'assets','app.js'))
+  assert.throws(()=>safeAsset(root,'/%2e%2e/private.key'))
+  assert.throws(()=>safeAsset(root,'/..%5cprivate.key'))
+})
+test('update sources require HTTPS and no embedded credentials',()=>{
+  assert.equal(updateUrl('https://example.com/releases'),'https://example.com/releases/')
+  assert.equal(updateUrl(''),'')
+  for(const url of ['http://example.com','https://key@example.com','https://example.com/?token=secret'])assert.throws(()=>updateUrl(url))
+})
+test('updates without schema metadata or with a downgrade are rejected',()=>{
+  assert.equal(compatibleUpdate({minimumSchemaVersion:0,dataSchemaVersion:2},2),true)
+  assert.equal(compatibleUpdate({minimumSchemaVersion:0,dataSchemaVersion:3},2),true)
+  assert.throws(()=>compatibleUpdate({minimumSchemaVersion:0,dataSchemaVersion:2},3))
+  assert.throws(()=>compatibleUpdate({minimumSchemaVersion:3,dataSchemaVersion:4},2))
+  assert.throws(()=>compatibleUpdate({minimumSchemaVersion:0,dataSchemaVersion:1},2))
+  assert.throws(()=>compatibleUpdate({},2))
+})
+test('runtime paths stay inside the named user directory',()=>{
+  assert.equal(isInside('D:/Data','D:/Data/import-123'),true)
+  assert.equal(isInside('D:/Data','D:/DataElse'),false)
+  assert.equal(isInside('D:/Data','D:/Data'),false)
+})
+test('localhost service ports are allocated without fixed port conflicts',async()=>{
+  const port=await freePort();assert.ok(port>0&&port<65536)
+})

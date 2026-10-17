@@ -1,0 +1,40 @@
+appId: cn.classnotes.desktop
+productName: 课记
+executableName: ClassNotes
+artifactName: ClassNotes-Setup-${version}-${arch}.${ext}
+asar: true
+directories:
+  output: ../artifacts/desktop
+  buildResources: build
+files:
+  - src/**
+  - package.json
+extraResources:
+  - from: build/app-update.yml
+    to: app-update.yml
+  - from: resources
+    to: bundled
+    filter:
+      - '**/*'
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  requestedExecutionLevel: asInvoker
+nsis:
+  guid: 4a0bbf89-00c9-49b6-9e13-9aa57876d77d
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 课记
+  uninstallDisplayName: 课记
+  deleteAppDataOnUninstall: false
+  runAfterFinish: false
+  installerLanguages: [zh_CN, en_US]
+  language: 2052
+  include: build/installer.nsh
+  differentialPackage: true

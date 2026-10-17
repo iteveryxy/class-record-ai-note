@@ -1,0 +1,2 @@
+# Runtime feed is supplied through the desktop settings or release.json.
+updaterCacheDirName: classnotes-updater
