@@ -1,4 +1,4 @@
-param([string]$PreviousInstaller, [string]$FixtureDataDirectory)
+param([string]$PreviousInstaller, [string]$FixtureDataDirectory, [ValidateSet('system','zh-CN','en')][string]$Language)
 $ErrorActionPreference='Stop'
 $taskRoot=Split-Path -Parent $PSScriptRoot
 $desktopVersion=(Get-Content -LiteralPath (Join-Path $taskRoot 'desktop/package.json') -Raw|ConvertFrom-Json).version
@@ -17,6 +17,11 @@ if($FixtureDataDirectory) {
     if(-not(Test-Path -LiteralPath (Join-Path $fixture 'classnotes.db'))){throw '兼容性测试资料缺少数据库'}
     New-Item -ItemType Directory -Force -Path $userDir|Out-Null
     Copy-Item -LiteralPath $fixture -Destination (Join-Path $userDir 'data') -Recurse
+}
+$preferences=Join-Path $userDir 'desktop.json'
+if($Language) {
+    New-Item -ItemType Directory -Force -Path $userDir|Out-Null
+    @{language=$Language;updateUrl=''}|ConvertTo-Json|Set-Content -LiteralPath $preferences -Encoding utf8NoBOM
 }
 $python=Join-Path $taskRoot 'worker/.venv/Scripts/python.exe'
 if(-not(Test-Path -LiteralPath $python)){throw '安装测试需要已建立的 Worker 开发环境，用于比较测试资料'}
@@ -42,12 +47,18 @@ function Run-Diagnostic([string]$name) {
 if($PreviousInstaller){Install-TestVersion ([IO.Path]::GetFullPath($PreviousInstaller))}else{Install-TestVersion}
 $before=Run-Diagnostic 'installed-before-overlay'
 Check-TestData 'capture'
+$preferencesBefore=if($Language){(Get-FileHash -LiteralPath $preferences -Algorithm SHA256).Hash}else{''}
 $keyBefore=(Get-FileHash -LiteralPath (Join-Path $userDir 'data/settings.key') -Algorithm SHA256).Hash
 $marker=Join-Path $userDir 'retention-marker.txt'
 Set-Content -LiteralPath $marker -Value 'upgrade-and-uninstall-must-retain-this-data' -Encoding utf8
 Install-TestVersion
 $after=Run-Diagnostic 'installed-after-overlay'
 if($after.version -ne $desktopVersion){throw '覆盖更新后仍在运行旧版本'}
+if($Language) {
+    if((Get-FileHash -LiteralPath $preferences -Algorithm SHA256).Hash -ne $preferencesBefore){throw '升级改变了语言偏好'}
+    if($Language -eq 'en' -and -not $after.renderer.body.Contains('My lecture recordings')){throw '升级后未使用保存的英文界面'}
+    if($Language -eq 'zh-CN' -and -not $after.renderer.body.Contains('我的课堂录音')){throw '升级后未使用保存的中文界面'}
+}
 Check-TestData 'verify'
 $keyAfter=(Get-FileHash -LiteralPath (Join-Path $userDir 'data/settings.key') -Algorithm SHA256).Hash
 if($keyBefore -ne $keyAfter -or -not(Test-Path -LiteralPath $marker)){throw '覆盖安装丢失了测试数据或凭证密钥'}
@@ -64,5 +75,6 @@ if(-not(Test-Path -LiteralPath (Join-Path $userDir 'data/classnotes.db')) -or -n
 Check-TestData 'verify'
 $remaining=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue|Where-Object {$_.DisplayName -eq '课记'})
 if($remaining.Count){throw '测试卸载后注册表记录仍然存在'}
-@{installed=$true;overlayPreservedKey=$true;overlayPreservedDatabaseRows=$true;uninstalled=$true;dataRetained=$true;testRoot=$testRoot;previousVersion=$before.version;version=$after.version}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $taskRoot "artifacts/runtime/installer-smoke-$desktopVersion-result.json") -Encoding utf8
+if($Language -and (Get-FileHash -LiteralPath $preferences -Algorithm SHA256).Hash -ne $preferencesBefore){throw '卸载改变了语言偏好'}
+@{installed=$true;overlayPreservedKey=$true;overlayPreservedDatabaseRows=$true;uninstalled=$true;dataRetained=$true;languagePreference=$Language;languagePreferenceRetained=[bool]$Language;testRoot=$testRoot;previousVersion=$before.version;version=$after.version}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $taskRoot "artifacts/runtime/installer-smoke-$desktopVersion-result.json") -Encoding utf8
 Write-Output '安装、覆盖重装、卸载与数据保留检查通过。'

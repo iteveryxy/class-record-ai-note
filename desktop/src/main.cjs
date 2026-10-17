@@ -18,6 +18,7 @@ const explicitData = argument('--data-dir')
 app.setPath('userData', explicitData ? path.resolve(explicitData) : path.join(app.getPath('appData'), 'ClassNotes'))
 const smoke = argument('--diagnostics')
 const diagnosticAudio = argument('--diagnostics-upload')
+const diagnosticLanguage = argument('--diagnostics-language')
 const demo = process.argv.includes('--demo')
 let window, services, updates, quitting = false, confirming = false, dirty = false, uploading = false, serviceState = { phase: 'starting', message: '正在启动课记…' }
 const version = app.getVersion()
@@ -49,7 +50,7 @@ async function requestQuit() {
   confirming=true
   try {
     const active=await services?.request('/api/activity').then(r=>r.active).catch(()=>false)
-    if((active||dirty||uploading)&&!smoke) {
+    if((active||dirty||uploading)&&(!smoke||!!diagnosticLanguage)) {
       const result=await dialog.showMessageBox(window,{type:'question',buttons:[tr('继续使用'),tr('退出课记')],defaultId:0,cancelId:0,
         message:tr(uploading?'录音正在上传':active?'还有录音正在处理':'还有尚未保存的笔记草稿'),detail:tr(uploading?'退出会中止此次上传。建议等待保存完成；若中止，可在下次启动后重新选择录音上传。':'退出会停止本地服务。已保存的数据和本地草稿会保留，中断任务下次启动可重试。')})
       if(result.response!==1) return
@@ -134,6 +135,12 @@ async function start() {
   await window.loadURL('classnotes://app/')
   if(smoke) {
     await new Promise(resolve=>setTimeout(resolve,1500))
+    if(diagnosticLanguage) {
+      if(!explicitData)throw new Error('Language diagnostics require an isolated data directory')
+      const result=await require('./language-diagnostics.cjs').verifyLanguage({window,dialog,output:smoke,phase:diagnosticLanguage})
+      fs.writeFileSync(smoke,JSON.stringify({...result,version,health:services.health},null,2))
+      quitting=true;await services.stop();app.quit();return
+    }
     if(diagnosticAudio) {
       if(!explicitData) throw new Error('上传诊断必须指定独立资料目录')
       const result=await require('./progress-diagnostics.cjs').verifyProgress({window,services,audio:diagnosticAudio,output:smoke})

@@ -10,6 +10,8 @@ files:
   - src/**
   - package.json
 extraResources:
+  - from: ../LICENSE
+    to: LICENSE-ClassNotes.txt
   - from: build/app-update.yml
     to: app-update.yml
   - from: resources
@@ -36,5 +38,6 @@ nsis:
   runAfterFinish: false
   installerLanguages: [zh_CN, en_US]
   language: 2052
+  displayLanguageSelector: true
   include: build/installer.nsh
   differentialPackage: true

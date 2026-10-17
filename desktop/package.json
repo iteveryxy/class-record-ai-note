@@ -4,6 +4,7 @@
   "private": true,
   "description": "课记：本地课堂录音与 AI 知识笔记",
   "author": "Class Notes",
+  "license": "MIT",
   "main": "src/main.cjs",
   "scripts": {
     "start": "electron .",
