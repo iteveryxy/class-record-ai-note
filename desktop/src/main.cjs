@@ -9,6 +9,8 @@ const { safeAsset, isInside } = require('./core.cjs')
 const { Services } = require('./services.cjs')
 const { Updates } = require('./updater.cjs')
 const { uploadBody } = require('./upload-progress.cjs')
+const { loadPreferences,writePreferences } = require('./preferences.cjs')
+const { resolveLocale,validPreference,text,message } = require('./i18n.cjs')
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'classnotes', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
 const argument = name => process.argv.find(value => value.startsWith(name+'='))?.slice(name.length+1)
@@ -23,9 +25,10 @@ const root = app.isPackaged ? path.join(process.resourcesPath, 'bundled') : path
 const userData = app.getPath('userData')
 fs.mkdirSync(path.join(userData,'logs'),{ recursive: true })
 const configPath = path.join(userData,'desktop.json')
-let config = { updateUrl: '' }
-try { config = { ...config, ...JSON.parse(fs.readFileSync(path.join(root,'release.json'),'utf8')), ...JSON.parse(fs.readFileSync(configPath,'utf8')) } }
-catch { try { config = { ...config, ...JSON.parse(fs.readFileSync(path.join(root,'release.json'),'utf8')) } } catch {} }
+const config = loadPreferences(path.join(root,'release.json'),configPath)
+const locale=()=>resolveLocale(config.language,app.getLocale())
+const tr=(key,params)=>text(locale(),key,params)
+const explain=value=>message(locale(),value)
 function send(state) { if(window&&!window.isDestroyed()) window.webContents.send('desktop:state',state) }
 function owned(event) { return window && event.sender === window.webContents && event.senderFrame?.url.startsWith('classnotes://app/') }
 function handle(name, action) { ipcMain.handle('desktop:'+name, async (event,...args) => { if(!owned(event)) throw new Error('无效的桌面调用'); return action(...args) }) }
@@ -37,7 +40,7 @@ else {
   app.whenReady().then(start).catch(async error=>{
     fs.appendFileSync(path.join(userData,'logs','desktop.log'),String(error.stack)+'\n')
     if(smoke) { fs.mkdirSync(path.dirname(smoke),{recursive:true});fs.writeFileSync(smoke,JSON.stringify({ok:false,error:error.message})); quitting=true;await services?.stop();app.exit(1) }
-    else { dialog.showErrorBox('课记启动失败',error.message+'\n诊断日志：'+path.join(userData,'logs'));quitting=true;await services?.stop();app.quit() }
+    else { dialog.showErrorBox(tr('课记启动失败'),explain(error.message)+'\n'+tr('诊断日志：')+path.join(userData,'logs'));quitting=true;await services?.stop();app.quit() }
   })
 }
 
@@ -47,8 +50,8 @@ async function requestQuit() {
   try {
     const active=await services?.request('/api/activity').then(r=>r.active).catch(()=>false)
     if((active||dirty||uploading)&&!smoke) {
-      const result=await dialog.showMessageBox(window,{type:'question',buttons:['继续使用','退出课记'],defaultId:0,cancelId:0,
-        message:uploading?'录音正在上传':active?'还有录音正在处理':'还有尚未保存的笔记草稿',detail:uploading?'退出会中止此次上传。建议等待保存完成；若中止，可在下次启动后重新选择录音上传。':'退出会停止本地服务。已保存的数据和本地草稿会保留，中断任务下次启动可重试。'})
+      const result=await dialog.showMessageBox(window,{type:'question',buttons:[tr('继续使用'),tr('退出课记')],defaultId:0,cancelId:0,
+        message:tr(uploading?'录音正在上传':active?'还有录音正在处理':'还有尚未保存的笔记草稿'),detail:tr(uploading?'退出会中止此次上传。建议等待保存完成；若中止，可在下次启动后重新选择录音上传。':'退出会停止本地服务。已保存的数据和本地草稿会保留，中断任务下次启动可重试。')})
       if(result.response!==1) return
     }
     quitting=true;await services?.stop();app.quit()
@@ -59,7 +62,7 @@ async function importData() {
   if(uploading) throw new Error('请先等待录音上传完成')
   if((await services.request('/api/recordings')).length) throw new Error('导入仅适用于空工作空间，避免覆盖已有笔记；可先备份或使用新的数据目录')
   if(dirty) throw new Error('请先保存笔记草稿')
-  const chosen=await dialog.showOpenDialog(window,{title:'选择旧版 data/local 数据目录',properties:['openDirectory']})
+  const chosen=await dialog.showOpenDialog(window,{title:tr('选择旧版 data/local 数据目录'),properties:['openDirectory']})
   if(chosen.canceled) return { imported:false }
   const source=chosen.filePaths[0], staging=path.join(userData,'import-'+Date.now())
   if(!isInside(userData,staging)) throw new Error('导入暂存路径无效')
@@ -111,17 +114,21 @@ async function start() {
       return new Response(response.body,{status:response.status,headers})
     } catch { return new Response('Not found',{status:404}) }
   })
-  window=new BrowserWindow({width:1260,height:850,minWidth:900,minHeight:640,frame:false,show:!smoke,backgroundColor:'#f5f7f6',title:'课记',icon:path.join(root,'icon.png'),
+  window=new BrowserWindow({width:1260,height:850,minWidth:900,minHeight:640,frame:false,show:!smoke,backgroundColor:'#f5f7f6',title:tr('课记'),icon:path.join(root,'icon.png'),
     webPreferences:{preload:path.join(__dirname,'preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false,webSecurity:true}})
   window.webContents.setWindowOpenHandler(({url})=>{if(url.startsWith('https://')) shell.openExternal(url);return {action:'deny'}})
   window.webContents.on('will-navigate',(event,url)=>{if(!url.startsWith('classnotes://app/')) {event.preventDefault();if(url.startsWith('https://')) shell.openExternal(url)}})
   window.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false))
   window.on('close',event=>{if(!quitting){event.preventDefault();requestQuit()}})
-  handle('info',()=>({version,platform:process.platform,packaged:app.isPackaged,dataDirectory:services.data,updateUrl:config.updateUrl,service:serviceState,update:updates.state,demo}))
+  handle('info',()=>({version,platform:process.platform,packaged:app.isPackaged,dataDirectory:services.data,updateUrl:config.updateUrl,service:serviceState,update:updates.state,demo,language:config.language,systemLocale:app.getLocale()}))
+  handle('language',value=>{
+    if(!validPreference(value))throw new Error(tr('语言选项无效'))
+    writePreferences(configPath,{...config,language:value});config.language=value;window.setTitle(tr('课记'))
+  })
   handle('minimize',()=>window.minimize());handle('maximize',()=>window.isMaximized()?window.unmaximize():window.maximize());handle('close',()=>window.close())
   handle('open-data',()=>shell.openPath(userData));handle('import-data',importData)
   handle('check-updates',()=>updates.check());handle('download-update',()=>updates.download());handle('apply-update',()=>updates.apply())
-  handle('configure-updates',url=>{const state=updates.configure(url);fs.writeFileSync(configPath,JSON.stringify(config,null,2));return state})
+  handle('configure-updates',url=>{const state=updates.configure(url);writePreferences(configPath,config);return state})
   ipcMain.on('desktop:dirty',(event,value)=>{if(owned(event)) dirty=Boolean(value)})
   ipcMain.on('desktop:uploading',(event,value)=>{if(owned(event)) uploading=Boolean(value)})
   await window.loadURL('classnotes://app/')
@@ -136,7 +143,7 @@ async function start() {
     const renderer=await window.webContents.executeJavaScript(`({title:document.title,body:document.body.innerText,desktop:!!window.classnotesDesktop})`)
     fs.mkdirSync(path.dirname(smoke),{recursive:true})
     fs.writeFileSync(smoke+'.png',(await window.webContents.capturePage()).toPNG())
-    fs.writeFileSync(smoke,JSON.stringify({ok:renderer.body.includes('我的课堂录音')&&renderer.desktop,version,health:services.health,renderer},null,2))
+    fs.writeFileSync(smoke,JSON.stringify({ok:(renderer.body.includes('我的课堂录音')||renderer.body.includes('My lecture recordings'))&&renderer.desktop,version,health:services.health,renderer},null,2))
     quitting=true;await services.stop();app.quit()
   }
 }

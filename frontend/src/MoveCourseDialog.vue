@@ -45,7 +45,7 @@ onUnmounted(()=>previousFocus?.isConnected&&previousFocus.focus())
         <button v-if="choices.length" type="button" class="text-btn move-mode" :disabled="saving" @click="creating=!creating;target='';error=''">{{ creating?t('选择已有课程'):t('输入新课程') }}</button>
         <p class="move-course-hint">{{ t('录音、转录、笔记和历史记录会一起归档。无需重新处理录音。') }}</p>
         <p v-if="recording.noteId" class="move-course-hint">{{ t('已同步到 Notion 的笔记，移动后请再点一次同步，将更新原来的页面。') }}</p>
-        <p v-if="error" class="move-course-error" role="alert">{{ error }}</p>
+        <p v-if="error" class="move-course-error" role="alert">{{ messageText(error) }}</p>
         <footer><button type="button" class="btn secondary" :disabled="saving" @click="emit('close')">{{ t('取消') }}</button><button type="submit" class="btn primary" :disabled="saving||!valid"><LoaderCircle v-if="saving" class="spin" :size="16"/><FolderInput v-else :size="16"/>{{ saving?t('正在移动…'):t('确认移动') }}</button></footer>
       </form>
     </section>

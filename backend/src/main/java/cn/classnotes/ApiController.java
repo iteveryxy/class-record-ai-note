@@ -24,7 +24,7 @@ import org.springframework.beans.factory.annotation.Value;
 @RequestMapping("/api")
 public class ApiController {
     private final Store store; private final Settings settings; private final Path data;
-    @Value("${app.version:0.2.4}") private String version;
+    @Value("${app.version:0.2.5}") private String version;
     public ApiController(Store store, Settings settings, Path dataDirectory) { this.store=store;this.settings=settings;this.data=dataDirectory; }
     @GetMapping("/health")
     public Map<String,Object> health() { return Map.of("status","ok","demo",settings.demo(),"version",version,"schemaVersion",DatabaseMigrations.CURRENT_VERSION); }

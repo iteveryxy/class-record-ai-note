@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('classnotesDesktop', {
   uploadProgressManaged: true,
   info: () => ipcRenderer.invoke('desktop:info'),
+  setLanguage: language => ipcRenderer.invoke('desktop:language',language),
   minimize: () => ipcRenderer.invoke('desktop:minimize'),
   maximize: () => ipcRenderer.invoke('desktop:maximize'),
   close: () => ipcRenderer.invoke('desktop:close'),

@@ -6,7 +6,7 @@ defineProps<{ progress: TranscriptionProgress; compact?: boolean }>()
 </script>
 <template>
   <section :class="['transcription-progress', { compact, failed: progress.phase==='failed', complete: progress.phase==='completed' }]" :aria-label="t('本地转录进度')">
-    <div class="progress-caption"><span>{{ compact ? (progress.phase==='queued'?t('等待转录'):progress.phase==='failed'?t('转录中断'):progress.phase==='converting'?t('转换音频'):progress.phase==='loading_model'?t('准备语音模型'):progress.phase==='finalizing'?t('保存转录结果'):t('本地转录')) : progress.message }}</span><strong v-if="progress.percent!=null">{{ progress.percent }}%</strong></div>
+    <div class="progress-caption"><span>{{ compact ? (progress.phase==='queued'?t('等待转录'):progress.phase==='failed'?t('转录中断'):progress.phase==='converting'?t('转换音频'):progress.phase==='loading_model'?t('准备语音模型'):progress.phase==='finalizing'?t('保存转录结果'):t('本地转录')) : messageText(progress.message) }}</span><strong v-if="progress.percent!=null">{{ progress.percent }}%</strong></div>
     <progress :value="progress.percent ?? undefined" max="100" :aria-label="t('转录完成比例')"/>
     <div v-if="!compact" class="progress-detail"><span v-if="progress.durationMs">{{ t('已识别') }} {{ time(progress.processedMs) }} / {{ time(progress.durationMs) }}</span><span v-if="progress.totalChunks">{{ progress.completedChunks }} / {{ progress.totalChunks }} {{ t('段') }}</span><span v-if="progress.phase==='queued'">{{ t('开始识别后将显示实际进度') }}</span><span v-if="progress.phase==='starting'">{{ t('本地服务准备中') }}</span></div>
   </section>

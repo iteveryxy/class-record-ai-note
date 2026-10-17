@@ -66,12 +66,12 @@ onUnmounted(()=>{disposed=true;clearInterval(poll);emit('dirty',false)})
         <div class="chat-user"><small>{{ t('你 · 基于 v') }}{{ turn.baseRevision }}</small><p>{{ turn.message }}</p></div>
         <div class="chat-assistant"><small><Sparkles :size="12"/>{{ t('AI 助手') }} <span v-if="turn.status==='SUCCEEDED'">{{ turn.changed?t('已保存 v{0}', {0: turn.resultRevision}):t('笔记未改动') }}</span></small>
           <p v-if="['QUEUED','RUNNING'].includes(turn.status)" class="chat-working"><LoaderCircle :size="14"/>{{ turn.status==='QUEUED'?t('正在排队…'):t('正在按你的要求检查并修改笔记…') }}</p>
-          <div v-else-if="turn.status==='FAILED'" class="chat-failed"><p>{{ turn.error || t('本次修改未完成，当前笔记保留。') }}</p><button class="text-btn" :disabled="blocked" @click="send(turn.message)"><RefreshCw :size="12"/>{{ t('重试这条要求') }}</button></div>
+          <div v-else-if="turn.status==='FAILED'" class="chat-failed"><p>{{ messageText(turn.error) || t('本次修改未完成，当前笔记保留。') }}</p><button class="text-btn" :disabled="blocked" @click="send(turn.message)"><RefreshCw :size="12"/>{{ t('重试这条要求') }}</button></div>
           <div v-else class="chat-reply" v-html="renderMarkdown(turn.reply||t('已完成'))"/>
         </div>
       </div>
     </div>
-    <div v-if="error" class="chat-error" role="alert">{{ error }}</div>
+    <div v-if="error" class="chat-error" role="alert">{{ messageText(error) }}</div>
     <footer><label for="note-ai-message">{{ t('修改要求或问题') }}</label><textarea id="note-ai-message" v-model="message" maxlength="5000" rows="3" :placeholder="t('例如：保留公式和易错点，只修改概念说明…')" :disabled="sending" @keydown="shortcut"/>
       <div class="chat-send-row"><small>{{ props.disabled ? (reason||t('请等待当前任务完成')) : pending ? t('AI 正在处理，完成后可继续对话') : t('Ctrl + Enter 发送 · 未提及的内容保留原文') }}</small><button class="btn primary compact" :disabled="blocked||!message.trim()" @click="send()"><LoaderCircle v-if="sending" :size="14"/><Send v-else :size="14"/>{{ t('发送') }}</button></div>
     </footer>

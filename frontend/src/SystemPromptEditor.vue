@@ -21,7 +21,7 @@ async function reset(){
     <p>{{ t('控制知识提取与 AI 对话的整理要求、表达风格和保留规则。编辑后点击「保存配置」，后续开始的任务使用新提示词。') }}</p>
     <textarea id="llm-system-prompt" :value="modelValue||''" :disabled="disabled||resetting" maxlength="20000" rows="10" spellcheck="false" @input="emit('update:modelValue',($event.target as HTMLTextAreaElement).value)"/>
     <div class="prompt-hint"><small>{{ (modelValue||'').length }} {{ t('/ 20000 字符') }}</small><small>{{ t('恢复默认会立即保存此项；AI 对话的精确修改格式由程序补充。') }}</small></div>
-    <p v-if="notice" class="prompt-notice" role="status">{{ notice }}</p><p v-if="error" class="prompt-error" role="alert">{{ error }}</p>
+    <p v-if="notice" class="prompt-notice" role="status">{{ messageText(notice) }}</p><p v-if="error" class="prompt-error" role="alert">{{ messageText(error) }}</p>
   </div>
 </template>
 <style scoped>
