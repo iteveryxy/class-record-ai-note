@@ -13,7 +13,7 @@ public final class Models {
                             String filename, long size, Long durationMs, String transcriptStatus,
                             String summaryStatus, String syncStatus, String lastError, String createdAt,
                             String updatedAt, String noteId, String noteTitle, String preview, boolean confirmed,
-                            TranscriptionProgress transcriptionProgress) {}
+                            TranscriptionProgress transcriptionProgress, boolean audioAvailable) {}
     @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
     public record TranscriptionProgress(String phase, String message, Integer percent, long processedMs,
                                         long durationMs, int completedChunks, int totalChunks) {}
@@ -45,4 +45,6 @@ public final class Models {
                          boolean changed,String status,String error,String createdAt) {}
     public record Refinement(String markdown,String reply) {}
     public record ActionRequest(Stage stage) {}
+    public record AudioStorageInfo(boolean audioAvailable, int files, long bytes, boolean canDelete, String transcriptId, String deleteBlockedReason) {}
+    public record AudioDeleteRequest(@NotBlank String transcriptId, boolean confirmed) {}
 }

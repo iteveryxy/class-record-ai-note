@@ -23,9 +23,9 @@ import org.springframework.beans.factory.annotation.Value;
 @RestController
 @RequestMapping("/api")
 public class ApiController {
-    private final Store store; private final Settings settings; private final Path data;
-    @Value("${app.version:0.2.5}") private String version;
-    public ApiController(Store store, Settings settings, Path dataDirectory) { this.store=store;this.settings=settings;this.data=dataDirectory; }
+    private final Store store; private final Settings settings; private final Path data; private final AudioStorage audioStorage;
+    @Value("${app.version:0.2.6}") private String version;
+    public ApiController(Store store, Settings settings, Path dataDirectory, AudioStorage audioStorage) { this.store=store;this.settings=settings;this.data=dataDirectory;this.audioStorage=audioStorage; }
     @GetMapping("/health")
     public Map<String,Object> health() { return Map.of("status","ok","demo",settings.demo(),"version",version,"schemaVersion",DatabaseMigrations.CURRENT_VERSION); }
     @GetMapping("/activity") public Map<String,Object> activity() {
@@ -77,9 +77,12 @@ public class ApiController {
     @GetMapping("/recordings/{id}/artifacts") public List<Artifact> artifacts(@PathVariable String id) { return store.artifacts(id); }
     @GetMapping("/recordings/{id}/audio") public ResponseEntity<Resource> audio(@PathVariable String id) {
         Recording rec=store.recording(id);
+        if(!rec.audioAvailable())throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND,"本地录音已清理，转录文字和笔记仍然保留");
         return ResponseEntity.ok().contentType(MediaType.parseMediaType(rec.filename().toLowerCase(Locale.ROOT).endsWith(".wav")?"audio/wav":"audio/mp4"))
                 .header(HttpHeaders.CONTENT_DISPOSITION,"inline").body(new FileSystemResource(store.audioPath(id)));
     }
+    @GetMapping("/recordings/{id}/audio-storage") public AudioStorageInfo audioStorage(@PathVariable String id) throws IOException { return audioStorage.inspect(id); }
+    @PostMapping("/recordings/{id}/audio/delete") public AudioStorageInfo deleteAudio(@PathVariable String id,@Valid @RequestBody AudioDeleteRequest input) throws IOException { return audioStorage.deleteConfirmed(id,input); }
     @PostMapping("/recordings/{id}/jobs") public ResponseEntity<Job> action(@PathVariable String id,@Valid @RequestBody ActionRequest action) {
         if(action.stage()==null) throw new IllegalArgumentException("请指定处理阶段");
         if(action.stage()==Stage.SYNC&&settings.demo()) throw new IllegalArgumentException("演示模式不写入 Notion；请以正式模式启动");

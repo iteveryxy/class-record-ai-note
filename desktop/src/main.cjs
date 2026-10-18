@@ -11,6 +11,7 @@ const { Updates } = require('./updater.cjs')
 const { uploadBody } = require('./upload-progress.cjs')
 const { loadPreferences,writePreferences } = require('./preferences.cjs')
 const { resolveLocale,validPreference,text,message } = require('./i18n.cjs')
+const { storageRoot, migrateStorage, assertStorageIdle: checkStorageIdle } = require('./storage.cjs')
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'classnotes', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
 const argument = name => process.argv.find(value => value.startsWith(name+'='))?.slice(name.length+1)
@@ -19,8 +20,10 @@ app.setPath('userData', explicitData ? path.resolve(explicitData) : path.join(ap
 const smoke = argument('--diagnostics')
 const diagnosticAudio = argument('--diagnostics-upload')
 const diagnosticLanguage = argument('--diagnostics-language')
+const diagnosticStorage = argument('--diagnostics-storage')
 const demo = process.argv.includes('--demo')
 let window, services, updates, quitting = false, confirming = false, dirty = false, uploading = false, serviceState = { phase: 'starting', message: '正在启动课记…' }
+let diskOperation = '', apiWrites = 0, storageState = { phase: 'idle', message: '' }
 const version = app.getVersion()
 const root = app.isPackaged ? path.join(process.resourcesPath, 'bundled') : path.join(__dirname, '..', 'resources')
 const userData = app.getPath('userData')
@@ -32,7 +35,7 @@ const tr=(key,params)=>text(locale(),key,params)
 const explain=value=>message(locale(),value)
 function send(state) { if(window&&!window.isDestroyed()) window.webContents.send('desktop:state',state) }
 function owned(event) { return window && event.sender === window.webContents && event.senderFrame?.url.startsWith('classnotes://app/') }
-function handle(name, action) { ipcMain.handle('desktop:'+name, async (event,...args) => { if(!owned(event)) throw new Error('无效的桌面调用'); return action(...args) }) }
+function handle(name, action) { ipcMain.handle('desktop:'+name, async (event,...args) => { if(!owned(event)) throw new Error(tr('无效的桌面调用')); try { return await action(...args) } catch(error) { throw new Error(error.cause?tr('迁移失败，原资料目录保留：{0}',{0:explain(error.cause.message)}):explain(error.message)) } }) }
 
 if (!app.requestSingleInstanceLock()) app.quit()
 else {
@@ -46,7 +49,7 @@ else {
 }
 
 async function requestQuit() {
-  if(confirming||quitting) return
+  if(confirming||quitting||diskOperation) return
   confirming=true
   try {
     const active=await services?.request('/api/activity').then(r=>r.active).catch(()=>false)
@@ -60,36 +63,72 @@ async function requestQuit() {
 }
 
 async function importData() {
+  if(diskOperation) throw new Error('资料操作正在进行，请等待完成')
   if(uploading) throw new Error('请先等待录音上传完成')
   if((await services.request('/api/recordings')).length) throw new Error('导入仅适用于空工作空间，避免覆盖已有笔记；可先备份或使用新的数据目录')
   if(dirty) throw new Error('请先保存笔记草稿')
+  diskOperation='choosing'
+  try {
   const chosen=await dialog.showOpenDialog(window,{title:tr('选择旧版 data/local 数据目录'),properties:['openDirectory']})
   if(chosen.canceled) return { imported:false }
-  const source=chosen.filePaths[0], staging=path.join(userData,'import-'+Date.now())
-  if(!isInside(userData,staging)) throw new Error('导入暂存路径无效')
+  diskOperation='import'
+  const source=chosen.filePaths[0], staging=path.join(services.storageRoot,'import-'+Date.now())
+  if(!isInside(services.storageRoot,staging)) throw new Error('导入暂存路径无效')
   serviceState={phase:'starting',message:'正在复制旧版录音与笔记…'};send({service:serviceState})
   await services.stop()
   let previous
   try {
     await promisify(execFile)(path.join(root,'worker','ClassNotesWorker.exe'),['--import-source',source,'--import-target',staging],{windowsHide:true,timeout:1800000,maxBuffer:1024*1024})
-    const old=path.join(userData,'data-before-import-'+Date.now())
-    if(!isInside(userData,old)) throw new Error('导入备份路径无效')
+    const old=path.join(services.storageRoot,'data-before-import-'+Date.now())
+    if(!isInside(services.storageRoot,old)) throw new Error('导入备份路径无效')
     fs.renameSync(services.data,old);previous=old;fs.renameSync(staging,services.data)
     await services.start();window.webContents.reload();return {imported:true}
   } catch(error) {
     if(previous && fs.existsSync(previous)) {
-      if(fs.existsSync(services.data)) fs.renameSync(services.data,path.join(userData,'import-failed-'+Date.now()))
+      await services.stop()
+      if(fs.existsSync(services.data)) fs.renameSync(services.data,path.join(services.storageRoot,'import-failed-'+Date.now()))
       fs.renameSync(previous,services.data)
     }
     await services.start();throw new Error('导入失败，原工作空间保留：'+error.message.slice(0,500))
   }
+  } finally { diskOperation='' }
+}
+
+async function assertStorageIdle() {
+  await checkStorageIdle({services,uploading,apiWrites,dirty})
+}
+function storageProgress(state) {
+  const labels={checking:'正在检查存储目录…',stopping:'正在安全关闭本地服务…',copying:'正在复制录音、笔记与模型…',verifying:'正在校验文件完整性…',starting:'正在新目录验证本地服务…',complete:'资料迁移完成，原目录作为备份保留',error:'迁移失败，原资料目录保留'}
+  storageState={...state,message:labels[state.phase]||state.message||'',percent:state.total?Math.min(100,Math.floor(state.loaded*100/state.total)):undefined}
+  send({storage:storageState})
+}
+async function chooseStorage() {
+  if(diskOperation) throw new Error('资料操作正在进行，请等待完成')
+  diskOperation='choosing'
+  try {
+    await assertStorageIdle()
+    const chosen=await dialog.showOpenDialog(window,{title:tr('选择新的空存储文件夹'),properties:['openDirectory','createDirectory']})
+    if(chosen.canceled)return {migrated:false}
+    const target=chosen.filePaths[0]
+    const answer=await dialog.showMessageBox(window,{type:'question',buttons:[tr('取消'),tr('开始迁移')],defaultId:0,cancelId:0,
+      message:tr('将资料迁移到新文件夹？'),detail:tr('录音、笔记、转录、历史、密钥和模型缓存会复制到目标目录。切换前将进行校验，原目录保留为备份。迁移期间请保持课记运行。')+'\n\n'+target})
+    if(answer.response!==1)return {migrated:false}
+    await assertStorageIdle()
+    diskOperation='migrate';storageProgress({phase:'checking'})
+    return await migrateStorage({services,target,protectedRoots:[userData,root,app.getAppPath(),path.dirname(app.getPath('exe'))],
+      notify:storageProgress,
+      persist:value=>{const next={...config,...value};writePreferences(configPath,next);Object.assign(config,value);try{writePreferences(path.join(userData,'desktop.storage-backup.json'),next)}catch{/* The committed primary preference file remains authoritative. */}},
+      journal:value=>writePreferences(path.join(userData,'storage-migration.json'),value)})
+  } catch(error) { storageProgress({phase:'error'});throw error }
+  finally { diskOperation='' }
 }
 
 async function start() {
   Menu.setApplicationMenu(null)
-  services=new Services({resources:root,userData,demo,version,notify:state=>{serviceState=state;send({service:state})}})
+  services=new Services({resources:root,userData,storageRoot:storageRoot(config,userData),demo,version,notify:state=>{serviceState=state;send({service:state})}})
   await services.start()
   updates=new Updates({app,config,services,notify:state=>send({update:state}),install:async apply=>{
+    if(diskOperation) throw new Error('资料操作正在进行，请等待完成')
     if(uploading) throw new Error('录音正在上传，请完成后再重启安装')
     if(dirty) throw new Error('请先保存或完成当前草稿，再重启安装')
     quitting=true;await services.stop();apply()
@@ -99,6 +138,8 @@ async function start() {
     if(url.host!=='app') return new Response('Forbidden',{status:403})
     if(request.initiatorOrigin&&request.initiatorOrigin!=='classnotes://app') return new Response('Forbidden',{status:403})
     if(url.pathname.startsWith('/api/')) {
+      const writing=!['GET','HEAD'].includes(request.method)
+      if((writing&&diskOperation)||diskOperation==='migrate'||diskOperation==='import')return Response.json({message:tr('资料操作正在进行，请等待完成')},{status:503})
       const headers=new Headers(request.headers);headers.delete('origin');headers.delete('host');headers.delete('cookie');headers.set('Authorization','Bearer '+services.token)
       const options={method:request.method,headers,redirect:'manual'}
       if(!['GET','HEAD'].includes(request.method)) {
@@ -106,7 +147,9 @@ async function start() {
           ?uploadBody(request.body,request.headers.get('x-classnotes-upload-length')||request.headers.get('content-length'),upload=>send({upload})):request.body
         options.duplex='half'
       }
-      return net.fetch(services.baseUrl+url.pathname+url.search,options)
+      if(writing)apiWrites++
+      try { return await net.fetch(services.baseUrl+url.pathname+url.search,options) }
+      finally { if(writing)apiWrites-- }
     }
     try {
       const response=await net.fetch(pathToFileURL(safeAsset(path.join(root,'ui'),url.pathname)).href)
@@ -121,13 +164,14 @@ async function start() {
   window.webContents.on('will-navigate',(event,url)=>{if(!url.startsWith('classnotes://app/')) {event.preventDefault();if(url.startsWith('https://')) shell.openExternal(url)}})
   window.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false))
   window.on('close',event=>{if(!quitting){event.preventDefault();requestQuit()}})
-  handle('info',()=>({version,platform:process.platform,packaged:app.isPackaged,dataDirectory:services.data,updateUrl:config.updateUrl,service:serviceState,update:updates.state,demo,language:config.language,systemLocale:app.getLocale()}))
+  handle('info',()=>({version,platform:process.platform,packaged:app.isPackaged,dataDirectory:services.data,storageRoot:services.storageRoot,storage:storageState,configDirectory:userData,updateUrl:config.updateUrl,service:serviceState,update:updates.state,demo,language:config.language,systemLocale:app.getLocale()}))
   handle('language',value=>{
     if(!validPreference(value))throw new Error(tr('语言选项无效'))
     writePreferences(configPath,{...config,language:value});config.language=value;window.setTitle(tr('课记'))
   })
   handle('minimize',()=>window.minimize());handle('maximize',()=>window.isMaximized()?window.unmaximize():window.maximize());handle('close',()=>window.close())
-  handle('open-data',()=>shell.openPath(userData));handle('import-data',importData)
+  handle('open-data',()=>shell.openPath(services.storageRoot));handle('import-data',importData)
+  handle('migrate-storage',chooseStorage)
   handle('check-updates',()=>updates.check());handle('download-update',()=>updates.download());handle('apply-update',()=>updates.apply())
   handle('configure-updates',url=>{const state=updates.configure(url);writePreferences(configPath,config);return state})
   ipcMain.on('desktop:dirty',(event,value)=>{if(owned(event)) dirty=Boolean(value)})
@@ -135,6 +179,12 @@ async function start() {
   await window.loadURL('classnotes://app/')
   if(smoke) {
     await new Promise(resolve=>setTimeout(resolve,1500))
+    if(diagnosticStorage) {
+      if(!explicitData)throw new Error('Storage diagnostics require an isolated data directory')
+      const result=await require('./storage-diagnostics.cjs').verifyStorage({window,dialog,output:smoke,phase:diagnosticStorage,userData})
+      fs.writeFileSync(smoke,JSON.stringify({...result,version,health:services.health},null,2))
+      quitting=true;await services.stop();app.quit();return
+    }
     if(diagnosticLanguage) {
       if(!explicitData)throw new Error('Language diagnostics require an isolated data directory')
       const result=await require('./language-diagnostics.cjs').verifyLanguage({window,dialog,output:smoke,phase:diagnosticLanguage})
@@ -150,7 +200,7 @@ async function start() {
     const renderer=await window.webContents.executeJavaScript(`({title:document.title,body:document.body.innerText,desktop:!!window.classnotesDesktop})`)
     fs.mkdirSync(path.dirname(smoke),{recursive:true})
     fs.writeFileSync(smoke+'.png',(await window.webContents.capturePage()).toPNG())
-    fs.writeFileSync(smoke,JSON.stringify({ok:(renderer.body.includes('我的课堂录音')||renderer.body.includes('My lecture recordings'))&&renderer.desktop,version,health:services.health,renderer},null,2))
+    fs.writeFileSync(smoke,JSON.stringify({ok:(renderer.body.includes('我的课堂录音')||renderer.body.includes('My lecture recordings'))&&renderer.desktop,version,health:services.health,renderer,dataDirectory:services.data,storageRoot:services.storageRoot},null,2))
     quitting=true;await services.stop();app.quit()
   }
 }

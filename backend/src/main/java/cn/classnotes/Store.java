@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -60,7 +61,8 @@ public class Store {
             r.getString("summary_status"), r.getString("sync_status"), r.getString("last_error"),
             r.getString("created_at"), r.getString("updated_at"), r.getString("note_id"), r.getString("note_title"),
             r.getString("preview"), r.getBoolean("confirmed"),
-            progress.read(r.getString("transcript_status"),r.getString("progress_job_id"),nullableLong(r,"duration_ms"))); }
+            progress.read(r.getString("transcript_status"),r.getString("progress_job_id"),nullableLong(r,"duration_ms")),
+            Files.isRegularFile(storedAudioPath(r.getString("stored_name")))); }
     private static final RowMapper<Note> NOTE = (r, i) -> new Note(r.getString("id"), r.getString("recording_id"),
             r.getString("title"), r.getString("markdown"), r.getString("category"), r.getLong("revision"),
             nullableLong(r,"confirmed_revision"), nullableLong(r,"synced_revision"), r.getString("notion_page_id"),
@@ -105,6 +107,11 @@ public class Store {
     public Path audioPath(String id) {
         recording(id);
         String name = db.queryForObject("SELECT stored_name FROM recordings WHERE id=?", String.class, id);
+        return storedAudioPath(name);
+    }
+    private Path storedAudioPath(String name) {
+        if(name==null||name.isBlank()||!Path.of(name).getFileName().toString().equals(name)||name.equals(".")||name.equals("..")||name.contains("\\")||name.contains("/"))
+            throw conflict("录音存储路径无效");
         return data.resolve("audio").resolve(name);
     }
     @Transactional
@@ -163,6 +170,7 @@ public class Store {
         if (db.queryForObject("SELECT count(*) FROM jobs WHERE recording_id=? AND status IN ('QUEUED','RUNNING')",Integer.class,recordingId)>0)
             throw conflict("此录音已有任务排队或运行，请等待完成");
         Note note = noteForRecording(recordingId);
+        if (stage == Stage.TRANSCRIBE && !recording.audioAvailable()) throw conflict("本地录音已清理，无法重新转录；转录文字和笔记仍然保留");
         if (stage == Stage.SUMMARIZE && currentTranscript(recordingId) == null) throw conflict("请先完成转录");
         if (stage == Stage.REFINE && note == null) throw conflict("请先生成课堂笔记");
         if (stage == Stage.SYNC && (note == null || !note.confirmed())) throw conflict("请先确认当前版本笔记");

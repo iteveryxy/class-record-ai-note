@@ -3,7 +3,7 @@ export interface Recording {
   id: string; title: string; course: string; recordedOn: string; category: string; filename: string
   size: number; durationMs?: number; transcriptStatus: string; summaryStatus: string; syncStatus: string
   lastError?: string; createdAt: string; updatedAt: string; noteId?: string; noteTitle?: string; preview?: string; confirmed: boolean
-  transcriptionProgress?: TranscriptionProgress
+  transcriptionProgress?: TranscriptionProgress; audioAvailable: boolean
 }
 export interface TranscriptionProgress { phase: string; message: string; percent: number | null; processedMs: number; durationMs: number; completedChunks: number; totalChunks: number }
 export interface Note {

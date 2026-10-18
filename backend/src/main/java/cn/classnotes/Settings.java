@@ -32,6 +32,7 @@ public class Settings {
         defaults.put("llmModel",env.getProperty("app.llm-model",""));
         defaults.put("llmApiKey",env.getProperty("app.llm-api-key",""));
         defaults.put("llmChunkChars","6000"); defaults.put("autoSummarize","true");
+        defaults.put("retainRecordings","true");
         defaults.put("llmSystemPrompt",KnowledgeExtractor.PROMPT);
         defaults.put("notionToken",env.getProperty("app.notion-token",""));
         defaults.put("notionDatabaseId",env.getProperty("app.notion-database-id",""));
@@ -73,6 +74,7 @@ public class Settings {
             if (key.endsWith("Url")) validateUrl(value);
             if (key.equals("llmChunkChars")) { int n=Integer.parseInt(value); if(n<2000||n>12000) throw new IllegalArgumentException("总结分段长度须为 2000–12000 字符"); }
             if (key.equals("autoSummarize") && !Set.of("true","false").contains(value)) throw new IllegalArgumentException("自动整理设置无效");
+            if (key.equals("retainRecordings") && !Set.of("true","false").contains(value)) throw new IllegalArgumentException("录音保存设置无效");
             if ((key.equals("notionDatabaseId")||key.equals("notionDataSourceId"))&&!value.isBlank()&&!value.matches("[0-9a-fA-F-]{32,36}")) throw new IllegalArgumentException("Notion ID 应为数据库或数据源 UUID");
             if (key.endsWith("Property") && (value.isBlank()||value.length()>80)) throw new IllegalArgumentException("Notion 字段名应为 1–80 字符");
             db.update("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",key,SECRETS.contains(key)?encrypt(value):value);

@@ -6,13 +6,14 @@ const crypto = require('node:crypto')
 const { freePort } = require('./core.cjs')
 
 class Services {
-  constructor({ resources, userData, demo, version, notify }) {
+  constructor({ resources, userData, storageRoot = userData, demo, version, notify }) {
     Object.assign(this, { resources, userData, demo, version, notify })
     this.children = []; this.stopping = false
-    this.data = path.join(userData, 'data')
+    this.setStorageRoot(storageRoot)
     this.token = crypto.randomBytes(32).toString('hex')
     this.workerToken = crypto.randomBytes(32).toString('hex')
   }
+  setStorageRoot(directory) { this.storageRoot = directory; this.data = path.join(directory, 'data') }
   launch(executable, args, name, env) {
     const logDir = path.join(this.userData, 'logs'); fs.mkdirSync(logDir, { recursive: true })
     const output = fs.createWriteStream(path.join(logDir, `${name}.log`), { flags: 'a' })
@@ -41,7 +42,7 @@ class Services {
     this.baseUrl = `http://127.0.0.1:${this.port}`
     const environment = { DATA_DIR: this.data, APP_DEMO: String(this.demo), APP_DESKTOP: 'true', APP_API_TOKEN: this.token,
       APP_VERSION: this.version, PORT: String(this.port), ASR_WORKER_URL: `http://127.0.0.1:${this.workerPort}`, ASR_WORKER_TOKEN: this.workerToken,
-      MODELSCOPE_CACHE: path.join(this.userData, 'models', 'modelscope'), HF_HOME: path.join(this.userData, 'models', 'huggingface'), PYTHONIOENCODING: 'utf-8' }
+      MODELSCOPE_CACHE: path.join(this.storageRoot, 'models', 'modelscope'), HF_HOME: path.join(this.storageRoot, 'models', 'huggingface'), PYTHONIOENCODING: 'utf-8' }
     if (!this.demo) {
       const worker = this.launch(path.join(this.resources, 'worker', 'ClassNotesWorker.exe'), ['--port', String(this.workerPort)], 'worker', environment)
       await this.wait(`http://127.0.0.1:${this.workerPort}/health`, this.workerToken, worker)
@@ -58,12 +59,16 @@ class Services {
   }
   async stop() {
     this.stopping = true
-    await Promise.all(this.children.map(child => new Promise(resolve => {
-      if (child.exitCode !== null) { resolve(); return }
-      child.once('exit', resolve); child.kill()
-      const timer = setTimeout(resolve, 4000); timer.unref()
+    const stopped = child => child.exitCode !== null || child.signalCode !== null
+    const outcomes = await Promise.allSettled(this.children.map(child => new Promise((resolve, reject) => {
+      if (stopped(child)) { resolve(); return }
+      const timer = setTimeout(() => { child.removeListener('exit', done); reject(new Error('本地服务尚未退出，已停止资料切换，请稍后重试')) }, 15000)
+      const done = () => { clearTimeout(timer); resolve() }
+      child.once('exit', done); child.kill()
     })))
-    this.children = []
+    this.children = this.children.filter(child => !stopped(child))
+    const failure = outcomes.find(result => result.status === 'rejected')
+    if (failure) throw failure.reason
   }
 }
 module.exports = { Services }

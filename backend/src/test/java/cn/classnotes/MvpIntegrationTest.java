@@ -82,6 +82,7 @@ class MvpIntegrationTest {
     @Autowired Store store; @Autowired Settings settings; @Autowired JdbcTemplate db; @Autowired ObjectMapper json;
     @Autowired KnowledgeExtractor extractor; @Autowired CompatibleLlmProvider llm; @Autowired NotionSync notion;
     @Autowired NoteRefiner refiner;
+    @Autowired AudioStorage audioStorage;
     @Autowired MockMvc mvc;
     @Autowired Path dataDirectory;
     @BeforeEach void reset() {
@@ -106,6 +107,74 @@ class MvpIntegrationTest {
         Recording r=upload();Job first=store.claim();store.completeTranscript(first,transcript("可导一定连续，连续不一定可导"),false);
         store.enqueue(r.id(),Stage.SUMMARIZE);Job summary=store.claim();
         return store.completeSummary(summary,"## 核心概念\n可导与连续 [00:00:00]");
+    }
+    @Test void retentionDefaultsToKeepAndDoesNotRetroactivelyDeleteExistingAudio() throws Exception {
+        Note note=prepareNote();String id=note.recordingId();
+        assertThat(settings.get("retainRecordings")).isEqualTo("true");
+        audioStorage.afterTranscription(id);assertThat(store.recording(id).audioAvailable()).isTrue();
+        settings.save(Map.of("retainRecordings","false"));
+        assertThat(Files.exists(store.audioPath(id))).isTrue();
+        assertThatThrownBy(()->settings.save(Map.of("retainRecordings","sometimes"))).hasMessageContaining("无效");
+    }
+    @Test void successfulTranscriptionCleansOriginalAndAudioCachesButPreservesAllText() throws Exception {
+        Recording recording=upload();Job job=store.claim();
+        Path cached=dataDirectory.resolve("asr").resolve(job.id());Files.createDirectories(cached);
+        Files.write(cached.resolve("normalized.wav"),wav());Files.write(cached.resolve("chunk-00000.wav"),wav());
+        Files.writeString(cached.resolve("chunks.jsonl"),"raw recognized words");
+        Files.writeString(cached.resolve("result.json"),"{\"text\":\"课堂概念\"}");
+        store.artifact(job,"ASR_RESPONSE","original response");
+        store.completeTranscript(job,transcript("课堂概念"),true);
+        settings.save(Map.of("retainRecordings","false"));audioStorage.afterTranscription(recording.id());
+        assertThat(store.recording(recording.id()).audioAvailable()).isFalse();
+        assertThat(Files.exists(cached.resolve("normalized.wav"))).isFalse();
+        assertThat(Files.exists(cached.resolve("chunk-00000.wav"))).isFalse();
+        assertThat(Files.readString(cached.resolve("chunks.jsonl"))).isEqualTo("raw recognized words");
+        assertThat(Files.readString(cached.resolve("result.json"))).contains("课堂概念");
+        assertThat(store.currentTranscript(recording.id()).text()).isEqualTo("课堂概念");
+        assertThat(store.artifacts(recording.id())).anyMatch(a->a.content().equals("original response"));
+        Job summary=store.claim();assertThat(summary.stage()).isEqualTo(Stage.SUMMARIZE);
+        Note note=store.completeSummary(summary,"## 保留下来的笔记");
+        assertThat(store.note(note.id()).markdown()).contains("笔记");
+        mvc.perform(get("/api/recordings/"+recording.id()+"/audio")).andExpect(status().isNotFound());
+        assertThatThrownBy(()->store.enqueue(recording.id(),Stage.TRANSCRIBE)).hasMessageContaining("无法重新转录");
+    }
+    @Test void failedTranscriptionKeepsAudioForRetriesEvenWhenRetentionIsOff() throws Exception {
+        Recording recording=upload();Job job=store.claim();
+        Path cached=dataDirectory.resolve("asr").resolve(job.id());Files.createDirectories(cached);Files.write(cached.resolve("normalized.wav"),wav());
+        store.fail(job,"ASR unavailable");settings.save(Map.of("retainRecordings","false"));
+        assertThatThrownBy(()->audioStorage.afterTranscription(recording.id())).hasMessageContaining("失败录音保留");
+        assertThat(Files.exists(store.audioPath(recording.id()))).isTrue();assertThat(Files.exists(cached.resolve("normalized.wav"))).isTrue();
+        assertThat(store.enqueue(recording.id(),Stage.TRANSCRIBE).attempt()).isEqualTo(2);
+    }
+    @Test void manualCleanupRequiresConfirmationCurrentTranscriptAndIdleRecording() throws Exception {
+        Note note=prepareNote();String id=note.recordingId(),transcriptId=store.currentTranscript(id).id();
+        var versions=store.versions(note.id());
+        String endpoint="/api/recordings/"+id+"/audio/delete";
+        mvc.perform(post(endpoint).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("transcriptId",transcriptId,"confirmed",false)))).andExpect(status().isBadRequest());
+        mvc.perform(post(endpoint).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("transcriptId","stale","confirmed",true)))).andExpect(status().isConflict());
+        store.enqueue(id,Stage.SUMMARIZE);
+        assertThatThrownBy(()->audioStorage.deleteConfirmed(id,new AudioDeleteRequest(transcriptId,true))).hasMessageContaining("正在处理");
+        store.fail(store.claim(),"test cancelled");Recording other=upload();
+        mvc.perform(post(endpoint).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("transcriptId",transcriptId,"confirmed",true)))).andExpect(status().isOk());
+        assertThat(Files.exists(store.audioPath(other.id()))).isTrue();
+        assertThat(store.note(note.id())).isEqualTo(note);assertThat(store.versions(note.id())).isEqualTo(versions);
+        assertThat(store.currentTranscript(id).id()).isEqualTo(transcriptId);
+        assertThat(audioStorage.inspect(id).files()).isZero();
+        assertThat(audioStorage.deleteConfirmed(id,new AudioDeleteRequest(transcriptId,true)).files()).isZero();
+    }
+    @Test void malformedImportedAudioPathsAreNeverReadOrDeleted() throws Exception {
+        Note note=prepareNote();String id=note.recordingId();
+        Path outside=dataDirectory.resolve("do-not-delete.wav");Files.write(outside,wav());
+        db.update("UPDATE recordings SET stored_name='../do-not-delete.wav' WHERE id=?",id);
+        assertThatThrownBy(()->audioStorage.deleteConfirmed(id,new AudioDeleteRequest(store.currentTranscript(id).id(),true))).hasMessageContaining("路径无效");
+        assertThat(Files.exists(outside)).isTrue();
+    }
+    @Test void importedSharedAudioIsNeverDeletedFromAnotherRecording() throws Exception {
+        Note note=prepareNote();Recording other=upload();
+        db.update("UPDATE recordings SET stored_name=(SELECT stored_name FROM recordings WHERE id=?) WHERE id=?",note.recordingId(),other.id());
+        assertThat(audioStorage.inspect(note.recordingId()).canDelete()).isFalse();
+        assertThatThrownBy(()->audioStorage.deleteConfirmed(note.recordingId(),new AudioDeleteRequest(store.currentTranscript(note.recordingId()).id(),true))).hasMessageContaining("共享音频");
+        assertThat(Files.exists(store.audioPath(other.id()))).isTrue();
     }
     org.springframework.test.web.servlet.ResultActions move(String id,String course,String expectedCourse) throws Exception {
         return mvc.perform(put("/api/recordings/"+id+"/course").contentType(MediaType.APPLICATION_JSON)

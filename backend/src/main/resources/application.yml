@@ -15,7 +15,7 @@ spring:
     resources:
       static-locations: file:../frontend/dist/,classpath:/static/
 app:
-  version: ${APP_VERSION:0.2.5}
+  version: ${APP_VERSION:0.2.6}
   desktop: ${APP_DESKTOP:false}
   api-token: ${APP_API_TOKEN:}
   data-dir: ${DATA_DIR:../data}

@@ -15,6 +15,8 @@
 | GET | `/api/recordings/{id}` | 录音、当前笔记/转录、所有转录历史、任务、日志和笔记版本 |
 | PUT | `/api/recordings/{id}/course` | 更改录音及其笔记的课程归档，保留已有内容和 Notion 页面关联 |
 | GET | `/api/recordings/{id}/audio` | 播放原音频，支持 HTTP Range |
+| GET | `/api/recordings/{id}/audio-storage` | 统计该录音的本地音频文件、字节及可清理状态 |
+| POST | `/api/recordings/{id}/audio/delete` | 核对转录版本并确认清理本地音频，保留文字和笔记 |
 | GET | `/api/recordings/{id}/artifacts` | 每次调用的原始响应与生成 Markdown |
 | GET | `/api/notes/{id}/chat` | 最近 40 次 AI 对话，包含任务状态、回复和关联版本 |
 | POST | `/api/notes/{id}/chat` | 发送问题或修改要求，返回 202 与持久化对话任务 |
@@ -124,3 +126,14 @@ AI 对话请求为 `{"message":"保留全部公式，只精简重复说明","rev
 ```
 
 输入边界时间不会冒充词级对齐。失败 HTTP 详情包含 `artifactPath`，可查已经写出的 raw journal / error.json。
+
+
+## 录音保留与目录迁移（0.2.6）
+
+`PUT /api/settings` 接受字符串设置 `retainRecordings`，仅允许 `"true"` / `"false"`，默认 `"true"`。关闭后由实际任务执行器在转录数据库事务成功提交后清理音频；转录失败不清理，已完成的旧录音不会自动清理。清理异常记警告，不将已提交的成功转录标记失败。
+
+`Recording.audioAvailable` 表示上传的本地音频当前是否存在。不存在时音频接口返回 404，重新转录返回 409；整理、编辑、AI 对话和同步仍使用现有文字。
+
+`GET /api/recordings/{id}/audio-storage` 返回 `audioAvailable`、`files`、`bytes`、`canDelete`、`transcriptId`。清理请求为 `{"transcriptId":"读取到的当前转录 ID","confirmed":true}`；未确认返回 400，转录版本变化、转录未成功或本录音有活动任务返回 409。删除原音频以及本录音所有转录任务下的 WAV/M4A 缓存，保留原始 JSON、日志与数据库记录。重复清理可安全返回零文件。
+
+目录迁移仅提供受信桌面 IPC `migrateStorage()`，目录通过本机选择器确认，网页版本可在启动时设置 `DATA_DIR`。复制在源数据库排他目录锁下进行 SQLite backup，逐文件 SHA-256 校验后启动目标服务，通过健康检查才原子保存桌面存储指针。数据格式保持 v3。

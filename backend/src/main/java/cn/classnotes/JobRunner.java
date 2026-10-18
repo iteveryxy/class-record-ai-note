@@ -16,9 +16,10 @@ public class JobRunner {
     private final Store store; private final Settings settings; private final AsrProvider asr;
     private final KnowledgeExtractor extractor; private final NotionSync notion;
     private final NoteRefiner refiner;
+    private final AudioStorage audioStorage;
     private volatile boolean ready;
-    public JobRunner(Store store, Settings settings, AsrProvider asr, KnowledgeExtractor extractor, NotionSync notion,NoteRefiner refiner) {
-        this.store=store;this.settings=settings;this.asr=asr;this.extractor=extractor;this.notion=notion;this.refiner=refiner;
+    public JobRunner(Store store, Settings settings, AsrProvider asr, KnowledgeExtractor extractor, NotionSync notion,NoteRefiner refiner,AudioStorage audioStorage) {
+        this.store=store;this.settings=settings;this.asr=asr;this.extractor=extractor;this.notion=notion;this.refiner=refiner;this.audioStorage=audioStorage;
     }
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() { ready=true; }
@@ -32,6 +33,8 @@ public class JobRunner {
                 case TRANSCRIBE -> {
                     AsrResult result=asr.transcribe(job,store.audioPath(job.recordingId()));
                     store.completeTranscript(job,result,settings.autoSummarize()&&settings.llmReady());
+                    try { audioStorage.afterTranscription(job.recordingId()); }
+                    catch(Exception cleanup) { store.log(job.recordingId(),job.id(),"WARN","转录已保存，但音频清理未完成；可稍后手动清理");log.warn("Audio cleanup failed for {}",job.id(),cleanup); }
                     if(settings.autoSummarize()&&!settings.llmReady()) store.log(job.recordingId(),job.id(),"WARN","转录完成；配置大模型后可手动整理笔记");
                 }
                 case SUMMARIZE -> store.completeSummary(job,extractor.summarize(job,store.recording(job.recordingId()),store.currentTranscript(job.recordingId())));

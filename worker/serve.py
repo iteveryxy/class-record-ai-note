@@ -15,7 +15,20 @@ def main():
     parser.add_argument("--port",type=int)
     parser.add_argument("--import-source",type=Path)
     parser.add_argument("--import-target",type=Path)
+    parser.add_argument("--migrate-source",type=Path)
+    parser.add_argument("--migrate-target",type=Path)
     args=parser.parse_args()
+    if args.migrate_source and args.migrate_target:
+        import json
+        from storage import migrate_storage
+        try:
+            result=migrate_storage(args.migrate_source,args.migrate_target,
+                lambda state: print(json.dumps(state),flush=True))
+            print(json.dumps({"phase":"verified","result":result}),flush=True)
+        except Exception as error:
+            print(json.dumps({"phase":"error","message":str(error)}),flush=True)
+            raise SystemExit(1)
+        return
     if args.import_source and args.import_target:
         from storage import import_legacy
         import json

@@ -8,7 +8,7 @@ ClassNotes is a local, single-user desktop app that turns lecture recordings int
 
 ## Windows desktop app
 
-The current version is **0.2.5**, for **Windows x64**. Run `ClassNotes-Setup-0.2.5-x64.exe` from the release assets, or find a locally built installer under `artifacts/desktop/`.
+The current version is **0.2.6**, for **Windows x64**. Run `ClassNotes-Setup-0.2.6-x64.exe` from the release assets, or find a locally built installer under `artifacts/desktop/`.
 
 The installer includes Java, Python, FFmpeg and the CPU speech runtime. End users do not need to install development tools. The first transcription downloads approximately **936 MB** of SenseVoice model weights. Subsequent runs reuse the local cache.
 
@@ -26,6 +26,8 @@ Save your work and quit ClassNotes before installing an update. Install over the
 - **Move between courses:** move a recording together with its transcripts, notes, versions and chat history without reprocessing the audio.
 - **Notion sync:** review and confirm a note before syncing. A stable Source ID lets retries update the same page instead of creating duplicates.
 - **Chinese and English interface:** choose Simplified Chinese, English or the system language in Settings. The choice applies immediately and is remembered.
+- **Storage controls:** migrate recordings, transcripts, notes, history, encryption key and model cache to an empty folder. Copies are verified before switching, and the original folder stays as a backup.
+- **Optional audio retention:** disable keeping audio after successful transcription. Failed transcriptions keep their audio for retries. Review and delete existing audio separately from each recording’s details.
 
 Interface language is separate from your content. Changing it does not translate course names, recordings, transcripts or notes, and does not rewrite the System Prompt. To request notes in English, edit the System Prompt accordingly.
 
@@ -62,7 +64,7 @@ If page creation has an uncertain result, the app preserves the creation intent 
 
 ## Data, privacy and backups
 
-Desktop data is stored separately from program files under `%APPDATA%\ClassNotes`:
+By default, desktop data is stored separately from program files under `%APPDATA%\ClassNotes`:
 
 ```text
 ClassNotes/
@@ -82,6 +84,14 @@ Open the folder from **Settings → Desktop app and updates → Open data folder
 Normal updates and uninstall retain user data and model caches. Database migrations make backups before changing the schema; older app versions refuse to open newer data formats. The current data schema is **v3**.
 
 Audio transcription runs locally. Knowledge extraction and AI chat send relevant text to the model API you configure. Notion sync sends the confirmed note and archive fields to Notion. These remote features require network access. API keys and tokens are encrypted at rest and are not returned in plaintext by the settings API.
+
+### Change storage location and audio retention
+
+In **Settings → Storage and recordings**, click **Change location and migrate** and select an empty folder. Save settings and drafts and wait for all uploads and processing tasks first. The app copies `data/` and `models/`, checks file hashes and the database, then starts local services in the new location before saving the switch. The original folder remains as a backup.
+
+Desktop preferences, the storage pointer, browser drafts and diagnostic logs stay under `%APPDATA%\ClassNotes`. Keep this folder. After checking the new location, you may remove the old `data/` and `models/` yourself. An unavailable drive or mismatched storage identity prevents startup instead of creating an empty workspace. Reconnect the drive or restore `desktop.json` from backup. Use **0.2.6 or later** after migrating; older versions do not understand the custom location.
+
+**Keep local audio after successful transcription** is enabled by default. Turn it off and save settings to delete uploaded audio and transcription audio caches after subsequent successful transcriptions. Failed tasks retain audio for retries; existing recordings are unaffected. To delete an existing recording’s audio, open its details and use **Delete local audio**, then review and confirm. Text, timestamps, raw text output, notes and history remain. Playback and retranscription become unavailable. Your original upload source and old migration backups are unaffected.
 
 ## Updates
 
@@ -165,4 +175,4 @@ To check the push without changing the remote branch:
 - Transcription, extraction, AI revision and sync are separate persistent tasks. Retry a failed stage without discarding previous results. Only one task per recording can be active at a time.
 - Raw responses are saved before parsing. Truncated model output, reasoning-marked output and conflicting edits are rejected rather than replacing a valid note.
 
-Further documentation: [Architecture](docs/architecture.md), [API contract](docs/api.md), [Desktop deployment](docs/desktop.md) and [Release notes](docs/releases/0.2.5.md). These detailed documents are currently in Chinese.
+Further documentation: [Architecture](docs/architecture.md), [API contract](docs/api.md), [Desktop deployment](docs/desktop.md) and [Release notes](docs/releases/0.2.6.md). These detailed documents are currently in Chinese.

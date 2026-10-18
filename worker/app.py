@@ -19,7 +19,7 @@ transcriber = Transcriber(
     overlap_seconds=float(os.getenv("ASR_OVERLAP_SECONDS", "2")),
     dedupe=os.getenv("ASR_DEDUPE", "true").lower() == "true",
 )
-app = FastAPI(title="Class Notes ASR Worker", version="0.2.3")
+app = FastAPI(title="Class Notes ASR Worker", version="0.2.6")
 
 
 def authorize(authorization: str | None = Header(default=None)) -> None:
